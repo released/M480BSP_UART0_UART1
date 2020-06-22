@@ -11,7 +11,7 @@ update @ 2020/06/22
 
 3. Tera term setting , 
 
-![image](https://github.com/released/M480BSP_UART0_UART1/blob/master/tera_term_settingjpg)
+![image](https://github.com/released/M480BSP_UART0_UART1/blob/master/tera_term_setting.jpg)
 
 ==========================================================
 
