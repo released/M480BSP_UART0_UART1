@@ -31,6 +31,13 @@
 /* Global variables                                                                                        */
 /*---------------------------------------------------------------------------------------------------------*/
 #if !(defined(__ICCARM__) && (__VER__ >= 6010000))
+# if (__ARMCC_VERSION < 6040000)
+struct __FILE
+{
+    int handle; /* Add whatever you need here */
+};
+# endif
+#elif(__VER__ >= 8000000)
 struct __FILE
 {
     int handle; /* Add whatever you need here */
@@ -38,6 +45,7 @@ struct __FILE
 #endif
 FILE __stdout;
 FILE __stdin;
+
 
 enum { r0, r1, r2, r3, r12, lr, pc, psr};
 
@@ -434,12 +442,12 @@ static void SendChar_ToUART(int ch)
 {
     while(DEBUG_PORT->FIFOSTS & UART_FIFOSTS_TXFULL_Msk);
 
-    DEBUG_PORT->DAT = ch;
     if(ch == '\n')
     {
-        while(DEBUG_PORT->FIFOSTS & UART_FIFOSTS_TXFULL_Msk);
         DEBUG_PORT->DAT = '\r';
+        while(DEBUG_PORT->FIFOSTS & UART_FIFOSTS_TXFULL_Msk);
     }
+    DEBUG_PORT->DAT = ch;
 }
 
 #else
@@ -456,14 +464,6 @@ static void SendChar_ToUART(int ch)
     if(ch)
     {
         /* Push char */
-        i32Tmp = i32Head+1;
-        if(i32Tmp > BUF_SIZE) i32Tmp = 0;
-        if(i32Tmp != i32Tail)
-        {
-            u8Buf[i32Head] = ch;
-            i32Head = i32Tmp;
-        }
-
         if(ch == '\n')
         {
             i32Tmp = i32Head+1;
@@ -473,6 +473,14 @@ static void SendChar_ToUART(int ch)
                 u8Buf[i32Head] = '\r';
                 i32Head = i32Tmp;
             }
+        }
+
+        i32Tmp = i32Head+1;
+        if(i32Tmp > BUF_SIZE) i32Tmp = 0;
+        if(i32Tmp != i32Tail)
+        {
+            u8Buf[i32Head] = ch;
+            i32Head = i32Tmp;
         }
     }
     else
@@ -529,8 +537,8 @@ static void SendChar(int ch)
 
             for(i = 0; i < g_buf_len; i++)
                 SendChar_ToUART(g_buf[i]);
-            g_buf_len = 0;
 #endif
+            g_buf_len = 0;
         }
     }
 #else
@@ -666,7 +674,7 @@ int fputc(int ch, FILE *stream)
     return ch;
 }
 
-#if defined ( __GNUC__ )
+#if defined (__GNUC__) && !defined(__ARMCC_VERSION)
 
 int _write (int fd, char *ptr, int len)
 {
@@ -676,13 +684,14 @@ int _write (int fd, char *ptr, int len)
     {
         while(DEBUG_PORT->FIFOSTS & UART_FIFOSTS_TXFULL_Msk);
 
-        DEBUG_PORT->DAT = *ptr++;
-
         if(*ptr == '\n')
         {
-            while(DEBUG_PORT->FIFOSTS & UART_FIFOSTS_TXFULL_Msk);
             DEBUG_PORT->DAT = '\r';
+            while(DEBUG_PORT->FIFOSTS & UART_FIFOSTS_TXFULL_Msk);
         }
+
+        DEBUG_PORT->DAT = *ptr++;
+
     }
     return len;
 }

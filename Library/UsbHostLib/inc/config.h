@@ -55,14 +55,14 @@
 #define MAX_UDEV_DRIVER        8       /*!< Maximum number of registered drivers                      */
 #define MAX_ALT_PER_IFACE      8       /*!< maximum number of alternative interfaces per interface    */
 #define MAX_EP_PER_IFACE       6       /*!< maximum number of endpoints per interface                 */
-#define MAX_HUB_DEIVCE         8       /*!< Maximum number of hub devices                             */
+#define MAX_HUB_DEVICE         8       /*!< Maximum number of hub devices                             */
 
 /* Host controller hardware transfer descriptors memory pool. ED/TD/ITD of OHCI and QH/QTD of EHCI
    are all allocated from this pool. Allocated unit size is determined by MEM_POOL_UNIT_SIZE.
    May allocate one or more units depend on hardware descriptor type.                                 */
 
 #define MEM_POOL_UNIT_SIZE     64      /*!< A fixed hard coding setting. Do not change it!            */
-#define MEM_POOL_UNIT_NUM      64      /*!< Increase this or heap size if memory allocate failed.     */
+#define MEM_POOL_UNIT_NUM     256      /*!< Increase this or heap size if memory allocate failed.     */
 
 /*----------------------------------------------------------------------------------------*/
 /*   Re-defined staff for various compiler                                                */

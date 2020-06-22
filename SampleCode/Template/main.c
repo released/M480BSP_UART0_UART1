@@ -12,58 +12,68 @@
 
 #define PLL_CLOCK           		192000000
 
+#define LED_R					(PH0)
+#define LED_Y					(PH1)
+#define LED_G					(PH2)
+
 #define BUF_LEN					(1024)
 
-#define FIFO_THRESHOLD 			4
-#define RX_BUFFER_SIZE 			128
-#define RX_TIMEOUT_CNT 			60 //40~255
+#define FIFO_THRESHOLD 			(4)
+#define RX_BUFFER_SIZE 			(256)
+#define RX_TIMEOUT_CNT 			(60) //40~255
 
-#define RX_UNKNOWN_LENGTH
-
-#if defined (RX_UNKNOWN_LENGTH)
 #define UART_RX_IDEL(uart) (((uart)->FIFOSTS & UART_FIFOSTS_RXIDLE_Msk )>> UART_FIFOSTS_RXIDLE_Pos)
 
-enum
-{
-    eUART_RX_Received_Data_Finish = 0,
-    eUART_RX_Received_Data_NOT_Finish
-};
-
-volatile uint8_t g_au8UART0_RX_Buffer[RX_BUFFER_SIZE] = {0}; // UART Rx received data Buffer (RAM)
-volatile uint8_t g_bUART0_RX_Received_Data_State = eUART_RX_Received_Data_NOT_Finish;
-volatile uint8_t g_u8UART0_RDA_Trigger_Cnt = 0; // UART RDA interrupt trigger times counter
-volatile uint8_t g_u8UART0_RXTO_Trigger_Cnt = 0; // UART RXTO interrupt trigger times counter
-
-#endif
-
 typedef struct {
-	uint8_t buf[BUF_LEN];
-	uint16_t len;
-	uint8_t end;
+	uint8_t RX_Buffer[RX_BUFFER_SIZE];
+	uint16_t Length;
+	uint8_t RDA_Trigger_Cnt;
+	uint8_t RXTO_Trigger_Cnt;
+	
+//	uint8_t end;
 }UART_BUF_t;
 
 UART_BUF_t uart0Dev;
+UART_BUF_t uart1Dev;
+
+typedef enum{
+	flag_DEFAULT = 0 ,
+		
+	flag_UART0_Received_Data ,	
+	flag_UART1_Received_Data ,
+	
+	flag_END	
+}Flag_Index;
+
+volatile uint32_t BitFlag = 0;
+#define BitFlag_ON(flag)							(BitFlag|=flag)
+#define BitFlag_OFF(flag)							(BitFlag&=~flag)
+#define BitFlag_READ(flag)							((BitFlag&flag)?1:0)
+#define ReadBit(bit)								(uint32_t)(1<<bit)
+
+#define is_flag_set(idx)							(BitFlag_READ(ReadBit(idx)))
+#define set_flag(idx,en)							( (en == 1) ? (BitFlag_ON(ReadBit(idx))) : (BitFlag_OFF(ReadBit(idx))))
 
 extern void SYS_Init(void); 
 
-void send_UART1String(uint8_t* Data)
-{
-	uint16_t i = 0;
+//void send_UART1String(uint8_t* Data)
+//{
+//	uint16_t i = 0;
 
-	while (Data[i] != '\0')
-	{
-		UART_WRITE(UART1,Data[i++]);	
-	}
-}
+//	while (Data[i] != '\0')
+//	{
+//		UART_WRITE(UART1,Data[i++]);	
+//	}
+//}
 
 void TMR0_IRQHandler(void)
 {
 //	static uint16_t cnt_gpio = 0;
 
-	static uint32_t LOG = 0;
+//	static uint32_t LOG = 0;
 	static uint16_t CNT = 0;
 
-	uint8_t buffer[16] = {0};
+//	uint8_t buffer[16] = {0};
 
     if(TIMER_GetIntFlag(TIMER0) == 1)
     {
@@ -73,11 +83,9 @@ void TMR0_IRQHandler(void)
 		if (CNT++ >= 1000)
 		{
 			CNT = 0;
-        	printf("%s : %4d\r\n",__FUNCTION__,LOG++);
+//        	printf("%s : %4d\r\n",__FUNCTION__,LOG++);
 
-			sprintf((char*)buffer ,"LOG:%d", LOG);
-//			UART_Write(UART1,buffer,strlen((char*)buffer));
-			send_UART1String(buffer);
+			LED_G ^= 1;	
 		}
     }
 }
@@ -100,26 +108,59 @@ void GPIO_Init(void)
 
 void UART1_IRQHandler(void)
 {
-	uint8_t res = 0;
-	if (UART_GET_INT_FLAG(UART1,UART_INTSTS_RDAINT_Msk))
-	{
-		while(!UART_GET_RX_EMPTY(UART1))
-		{
-			res = UART_READ(UART1);
-			printf("%s (RDAINT) : %2d\r\n" , __FUNCTION__ , res);
-		}
-	}
-	
-	if (UART_GET_INT_FLAG(UART1,UART_INTSTS_RXTOIF_Msk))
-	{
-		while(!UART_GET_RX_EMPTY(UART1))
-		{
-			res = UART_READ(UART1);
-			printf("%s (RXTOIF) : %2d \r\n" , __FUNCTION__ , res);			
-		}
-	}
+	uint8_t i;
+	static uint16_t u16UART_RX_Buffer_Index = 0;
+
+    if(UART_GET_INT_FLAG(UART1, UART_INTSTS_RDAINT_Msk))    
+    {
+        /* UART receive data available flag */
+        
+        /* Record RDA interrupt trigger times */
+        uart1Dev.RDA_Trigger_Cnt++;
+        
+        /* Move the data from Rx FIFO to sw buffer (RAM). */
+        /* Every time leave 1 byte data in FIFO for Rx timeout */
+        for(i = 0 ; i < (FIFO_THRESHOLD - 1) ; i++)
+        {
+            uart1Dev.RX_Buffer[u16UART_RX_Buffer_Index] = UART_READ(UART1);
+            u16UART_RX_Buffer_Index ++;
+
+            if (u16UART_RX_Buffer_Index >= RX_BUFFER_SIZE) 
+                u16UART_RX_Buffer_Index = 0;
+        }
+    }
+    else if(UART_GET_INT_FLAG(UART1, UART_INTSTS_RXTOINT_Msk)) 
+    {
+        /* When Rx timeout flag is set to 1, it means there is no data needs to be transmitted. */
+
+        /* Record Timeout times */
+        uart1Dev.RXTO_Trigger_Cnt++;
+
+        /* Move the last data from Rx FIFO to sw buffer. */
+        while(UART_GET_RX_EMPTY(UART1) == 0)
+        {
+            uart1Dev.RX_Buffer[u16UART_RX_Buffer_Index] = UART_READ(UART1);
+            u16UART_RX_Buffer_Index ++;
+        }
+
+        /* Clear UART RX parameter */
+        UART_DISABLE_INT(UART1, UART_INTEN_RDAIEN_Msk | UART_INTEN_RXTOIEN_Msk);
+        u16UART_RX_Buffer_Index = 0;
+
+//		set_flag(flag_UART1_Received_Data , ENABLE);
+
+        printf("\nUART1 Rx Received Data : %s\n",uart1Dev.RX_Buffer);
+        printf("UART1 Rx RDA (Fifofull) interrupt times : %d\n",uart1Dev.RDA_Trigger_Cnt);
+        printf("UART1 Rx RXTO (Timeout) interrupt times : %d\n",uart1Dev.RXTO_Trigger_Cnt);
+
+        /* Reset UART interrupt parameter */
+        UART_EnableInt(UART1, UART_INTEN_RDAIEN_Msk | UART_INTEN_RXTOIEN_Msk);
+		memset(&uart1Dev, 0x00, sizeof(UART_BUF_t));
+
+    }
 	
 }
+
 
 void UART1_Init(void)	//PB2 , PB3
 {
@@ -134,18 +175,22 @@ void UART1_Init(void)	//PB2 , PB3
 	/* Set UART receive time-out */
 	UART_SetTimeoutCnt(UART1, RX_TIMEOUT_CNT);
 
-	UART1->FIFO &= ~UART_FIFO_RFITL_4BYTES;
-	UART1->FIFO |= UART_FIFO_RFITL_8BYTES;
+    UART1->FIFO = ((UART1->FIFO & (~UART_FIFO_RFITL_Msk)) | UART_FIFO_RFITL_4BYTES);
 
 	/* Enable UART Interrupt - */
 	UART_ENABLE_INT(UART1, UART_INTEN_RDAIEN_Msk | UART_INTEN_TOCNTEN_Msk | UART_INTEN_RXTOIEN_Msk);	
 	NVIC_EnableIRQ(UART1_IRQn);
-	UART_WAIT_TX_EMPTY(UART1);	
+
+	memset(&uart1Dev, 0x00, sizeof(UART_BUF_t));
+	
+	UART_WAIT_TX_EMPTY(UART1);
+
+//	set_flag(flag_UART1_Received_Data , DISABLE);
+	
 }
 
 void UART0_IRQHandler(void)
 {
-#if defined (RX_UNKNOWN_LENGTH)
 	uint8_t i;
 	static uint16_t u16UART_RX_Buffer_Index = 0;
 
@@ -154,13 +199,13 @@ void UART0_IRQHandler(void)
         /* UART receive data available flag */
         
         /* Record RDA interrupt trigger times */
-        g_u8UART0_RDA_Trigger_Cnt++;
+        uart0Dev.RDA_Trigger_Cnt++;
         
         /* Move the data from Rx FIFO to sw buffer (RAM). */
         /* Every time leave 1 byte data in FIFO for Rx timeout */
         for(i = 0 ; i < (FIFO_THRESHOLD - 1) ; i++)
         {
-            g_au8UART0_RX_Buffer[u16UART_RX_Buffer_Index] = UART_READ(UART0);
+            uart0Dev.RX_Buffer[u16UART_RX_Buffer_Index] = UART_READ(UART0);
             u16UART_RX_Buffer_Index ++;
 
             if (u16UART_RX_Buffer_Index >= RX_BUFFER_SIZE) 
@@ -172,88 +217,37 @@ void UART0_IRQHandler(void)
         /* When Rx timeout flag is set to 1, it means there is no data needs to be transmitted. */
 
         /* Record Timeout times */
-        g_u8UART0_RXTO_Trigger_Cnt++;
+        uart0Dev.RXTO_Trigger_Cnt++;
 
         /* Move the last data from Rx FIFO to sw buffer. */
         while(UART_GET_RX_EMPTY(UART0) == 0)
         {
-            g_au8UART0_RX_Buffer[u16UART_RX_Buffer_Index] = UART_READ(UART0);
+            uart0Dev.RX_Buffer[u16UART_RX_Buffer_Index] = UART_READ(UART0);
             u16UART_RX_Buffer_Index ++;
         }
 
         /* Clear UART RX parameter */
         UART_DISABLE_INT(UART0, UART_INTEN_RDAIEN_Msk | UART_INTEN_RXTOIEN_Msk);
         u16UART_RX_Buffer_Index = 0;
-        g_bUART0_RX_Received_Data_State = eUART_RX_Received_Data_Finish;
-    }
-#else
 
-	if (UART_GET_INT_FLAG(UART0,UART_INTSTS_RDAINT_Msk))
-	{
-		while(!UART_GET_RX_EMPTY(UART0))
-		{
-			uart0Dev.buf[uart0Dev.len++] = UART_READ(UART0);
-		}
-	}
-	
-	if (UART_GET_INT_FLAG(UART0,UART_INTSTS_RXTOIF_Msk))
-	{
-		while(!UART_GET_RX_EMPTY(UART0))
-		{
-			uart0Dev.buf[uart0Dev.len++] = UART_READ(UART0);
-		}
-		
-		uart0Dev.end = 1;
-	}
-#endif
-	
-}
+//		set_flag(flag_UART0_Received_Data , ENABLE);
 
-void UART0_Process(void)
-{
-	/*
-		EC_M451_UART_Timerout_V1.00.zip
-		https://www.nuvoton.com/hq/resource-download.jsp?tp_GUID=EC0120160728090754
-	*/
-
-	
-	#if defined (RX_UNKNOWN_LENGTH)
-        /* Wait to receive UART data */
-        while(UART_RX_IDEL(UART0));
-
-        /* Start to received UART data */
-        g_bUART0_RX_Received_Data_State = eUART_RX_Received_Data_NOT_Finish;        
-        /* Wait for receiving UART message finished */
-        while(g_bUART0_RX_Received_Data_State != eUART_RX_Received_Data_Finish); 
-
-        printf("\nUART0 Rx Received Data : %s\n",g_au8UART0_RX_Buffer);
-        printf("UART0 Rx RDA (Fifofull) interrupt times : %d\n",g_u8UART0_RDA_Trigger_Cnt);
-        printf("UART0 Rx RXTO (Timeout) interrupt times : %d\n",g_u8UART0_RXTO_Trigger_Cnt);
+        printf("\nUART0 Rx Received Data : %s\n",uart0Dev.RX_Buffer);
+        printf("UART0 Rx RDA (Fifofull) interrupt times : %d\n",uart0Dev.RDA_Trigger_Cnt);
+        printf("UART0 Rx RXTO (Timeout) interrupt times : %d\n",uart0Dev.RXTO_Trigger_Cnt);
 
         /* Reset UART interrupt parameter */
         UART_EnableInt(UART0, UART_INTEN_RDAIEN_Msk | UART_INTEN_RXTOIEN_Msk);
-        g_u8UART0_RDA_Trigger_Cnt = 0; // UART RDA interrupt times
-        g_u8UART0_RXTO_Trigger_Cnt = 0; // UART RXTO interrupt times
-	#else
-	if (uart0Dev.end)
-	{
-		while(!UART_GET_RX_EMPTY(UART0))
-		{
-			uart0Dev.buf[uart0Dev.len++] = UART_READ(UART0);
-		}
-
-		#if 1
-		printf("%s : %d\r\n",__FUNCTION__,uart0Dev.len);
-		#endif
-
-		UART_Write(UART0,uart0Dev.buf,uart0Dev.len);
-		
 		memset(&uart0Dev, 0x00, sizeof(UART_BUF_t));
-	}
-	#endif
 
+    }
+	
 }
 
+/*
+	EC_M451_UART_Timerout_V1.00.zip
+	https://www.nuvoton.com/hq/resource-download.jsp?tp_GUID=EC0120160728090754
+*/
 
 void UART0_Init(void)
 {
@@ -270,12 +264,7 @@ void UART0_Init(void)
 	UART_SetTimeoutCnt(UART0, RX_TIMEOUT_CNT);
 
 	/* Set UART FIFO RX interrupt trigger level to 4-bytes*/
-	#if defined (RX_UNKNOWN_LENGTH)
     UART0->FIFO = ((UART0->FIFO & (~UART_FIFO_RFITL_Msk)) | UART_FIFO_RFITL_4BYTES);
-	#else
-	UART0->FIFO &= ~UART_FIFO_RFITL_4BYTES;
-	UART0->FIFO |= UART_FIFO_RFITL_8BYTES;
-	#endif
 
 	/* Enable UART Interrupt - */
 	UART_ENABLE_INT(UART0, UART_INTEN_RDAIEN_Msk | UART_INTEN_TOCNTEN_Msk | UART_INTEN_RXTOIEN_Msk);
@@ -284,17 +273,24 @@ void UART0_Init(void)
 	
 	memset(&uart0Dev, 0x00, sizeof(UART_BUF_t));
 
-	#if defined (RX_UNKNOWN_LENGTH)
 	UART_WAIT_TX_EMPTY(UART0);
-	#endif
+	
+//	set_flag(flag_UART0_Received_Data , DISABLE);
 
 	printf("\r\nCLK_GetCPUFreq : %8d\r\n",CLK_GetCPUFreq());
 	printf("CLK_GetHCLKFreq : %8d\r\n",CLK_GetHCLKFreq());	
 	printf("CLK_GetPCLK0Freq : %8d\r\n",CLK_GetPCLK0Freq());
 	printf("CLK_GetPCLK1Freq : %8d\r\n",CLK_GetPCLK1Freq());
-	
+
 }
 
+void LED_Init(void)
+{
+	GPIO_SetMode(PH,BIT0,GPIO_MODE_OUTPUT);
+	GPIO_SetMode(PH,BIT1,GPIO_MODE_OUTPUT);
+	GPIO_SetMode(PH,BIT2,GPIO_MODE_OUTPUT);
+	
+}
 
 /*
 
@@ -328,7 +324,6 @@ void UART0_Init(void)
 
 int main()
 {
-
     SYS_Init();
 	
     UART0_Init();
@@ -341,8 +336,7 @@ int main()
     /* Got no where to go, just loop forever */
     while(1)
     {
-
-		UART0_Process();
+		LED_Y ^= 1;
     }
 
 }
